@@ -1399,13 +1399,15 @@ class Item(BaseItem):
                     chunk_size = 1048576
                     expected_size = math.ceil(size / chunk_size)
                     chunks = chunk_generator(body, chunk_size)
-                    progress_generator = tqdm(
-                        chunks,
-                        desc=f' uploading {key}',
-                        dynamic_ncols=True,
-                        total=expected_size,
-                        unit='MiB',
-                    )
+                    bar_format = '{desc}: {percentage:3.0f}%|{bar}' + \
+                                 '{n_fmt}/{total_fmt} [{elapsed}<{remaining}, ' + \
+                                 '{rate_noinv_fmt}{postfix}]'
+                    progress_generator = tqdm(chunks,
+                                              desc=f' uploading {key}',
+                                              dynamic_ncols=True,
+                                              total=expected_size,
+                                              unit='MiB',
+                                              bar_format=bar_format)
                     data = None
                     # pre_encode is needed because http doesn't know that it
                     # needs to encode a TextIO object when it's wrapped
