@@ -69,6 +69,42 @@ from internetarchive.utils import (
 log = getLogger(__name__)
 
 
+def _upload_size(value):
+    value = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(value) < 1024 or unit == "TiB":
+            return f"{value:.2f} {unit}"
+        value /= 1024
+
+
+class _UploadProgress(tqdm):
+    """Count bytes in upload chunks and display non-inverted IEC rates."""
+
+    def __iter__(self):
+        try:
+            for chunk in self.iterable:
+                yield chunk
+                self.update(len(chunk))
+        finally:
+            self.close()
+
+    @property
+    def format_dict(self):
+        values = super().format_dict
+        elapsed = values["elapsed"]
+        rate = values["rate"]
+        if rate is None and elapsed > 0 and self.n:
+            rate = self.n / elapsed
+        values["upload_rate"] = (
+            "? B/s" if rate is None else _upload_size(rate) + "/s"
+        )
+        values["uploaded"] = _upload_size(self.n)
+        values["expected"] = (
+            "?" if self.total is None else _upload_size(self.total)
+        )
+        return values
+
+
 @total_ordering
 class BaseItem:
     """Base class for Archive.org items.
@@ -1396,18 +1432,22 @@ class Item(BaseItem):
                     if size == 0:
                         raise Exception
 
-                    chunk_size = 1048576
-                    expected_size = math.ceil(size / chunk_size)
+                    chunk_size = 64 * 1024
                     chunks = chunk_generator(body, chunk_size)
-                    bar_format = '{desc}: {percentage:3.0f}%|{bar}' + \
-                                 '{n_fmt}/{total_fmt} [{elapsed}<{remaining}, ' + \
-                                 '{rate_noinv_fmt}{postfix}]'
-                    progress_generator = tqdm(chunks,
-                                              desc=f' uploading {key}',
-                                              dynamic_ncols=True,
-                                              total=expected_size,
-                                              unit='MiB',
-                                              bar_format=bar_format)
+                    bar_format = (
+                        '{desc}: {percentage:3.0f}%|{bar}| '
+                        '{uploaded}/{expected} [{elapsed}<{remaining}, '
+                        '{upload_rate}{postfix}]'
+                    )
+                    progress_generator = _UploadProgress(
+                        chunks,
+                        desc=f' uploading {key}',
+                        dynamic_ncols=True,
+                        total=size,
+                        unit='B',
+                        miniters=1,
+                        bar_format=bar_format,
+                    )
                     data = None
                     # pre_encode is needed because http doesn't know that it
                     # needs to encode a TextIO object when it's wrapped
